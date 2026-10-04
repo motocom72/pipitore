@@ -159,6 +159,13 @@ p{margin:0;}
 .custom input[type=color]::-webkit-color-swatch{border:0;border-radius:12px;}
 .custom input[type=color]::-moz-color-swatch{border:0;border-radius:12px;}
 .custom.on label{color:var(--ink);}
+/* recommended */
+.rec-link{display:block;margin:14px auto 0;border:0;background:transparent;color:var(--accent);font-weight:700;font-size:14px;min-height:44px;text-decoration:underline;text-underline-offset:4px;}
+.rec{display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line);}
+.rec .info{flex:1;min-width:0;}
+.rec h3{margin:0;font-size:16px;}
+.rec p{font-size:12px;color:var(--muted);margin-top:2px;}
+.rec .btn[disabled]{opacity:.5;}
 /* edit */
 .edit-head{display:flex;align-items:center;gap:10px;position:sticky;top:env(safe-area-inset-top,0px);background:var(--paper);padding:10px 0;z-index:2;}
 .edit-head h2{margin:0;flex:1;text-align:center;color:var(--ink);font-size:16px;}
@@ -172,6 +179,8 @@ p{margin:0;}
 .item.rest{background:transparent;border-style:dashed;}
 .item.rest::before{content:"休";font-family:var(--jp);font-size:13px;}
 .item .text{min-height:40px;padding:8px 10px;}
+.item .tipcell{grid-column:2;}
+.item .tipin{font-size:13px;min-height:34px;padding:6px 10px;color:var(--muted);}
 .item .ctrl{grid-column:2;display:flex;align-items:center;gap:5px;flex-wrap:nowrap;}
 .item .icon{min-width:36px;}
 .item .stepper button{width:34px;}
@@ -200,7 +209,12 @@ p{margin:0;}
 .controls{order:4;display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:10px;}
 .run[data-pip="bottom"] .pip-slot{order:5;}
 .kind{font-size:15px;font-weight:700;opacity:.85;}
-.now{font-size:clamp(26px,8vw,44px);font-weight:800;line-height:1.2;margin:2px 0 0;overflow-wrap:anywhere;}
+.alias{font-size:13px;font-weight:700;opacity:.75;margin-top:2px;min-height:0;}
+.alias:empty{display:none;}
+.tip{font-size:14px;line-height:1.55;max-width:30em;margin:8px auto 0;padding:8px 12px;border-radius:12px;background:rgba(255,255,255,.16);font-weight:500;}
+.run[data-kind="rest"] .tip,.run[data-kind="prep"] .tip{background:rgba(0,0,0,.07);}
+.tip:empty{display:none;}
+.now{font-size:clamp(24px,7vw,40px);font-weight:800;line-height:1.2;margin:2px 0 0;overflow-wrap:anywhere;}
 .count{font-family:var(--num);font-weight:700;font-size:min(40vw,24vh);line-height:.95;font-variant-numeric:tabular-nums;letter-spacing:-.01em;}
 .next{font-size:16px;opacity:.9;margin-top:4px;}
 .next b{font-weight:800;}
@@ -251,7 +265,16 @@ p{margin:0;}
 
   <div class="tiles" id="menuList"></div>
   <button class="add-tile" id="newMenu" type="button">＋ メニューを作る</button>
+  <button class="rec-link" id="openRec" type="button">おすすめメニューから追加</button>
 </main>
+
+<!-- SHEET: recommended menus -->
+<div class="overlay" id="recSheet" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="おすすめメニュー">
+    <div class="sheet-head"><h2>おすすめメニュー</h2><button class="round-btn" id="closeRec" type="button" aria-label="閉じる">✕</button></div>
+    <div id="recList"></div>
+  </div>
+</div>
 
 <!-- SHEET: settings + history -->
 <div class="overlay" id="sheet" hidden>
@@ -327,6 +350,8 @@ p{margin:0;}
   <div class="run-main" aria-live="polite">
     <div class="kind" id="kindLabel">準備</div>
     <div class="now" id="nowName"></div>
+    <div class="alias" id="aliasName"></div>
+    <p class="tip" id="tipLine"></p>
     <div class="count" id="count">5</div>
     <div class="next" id="nextLine"></div>
   </div>
@@ -345,17 +370,53 @@ const $ = s => document.querySelector(s);
 const LS_KEY = "nagara-timer-v1";
 const uid = () => Math.random().toString(36).slice(2,9);
 
+const W = (name, sec, tip) => ({name, sec, kind:"work", tip});
+const T = {
+  squat: "足は肩幅。イスに座るようにお尻を後ろへ引いて下ろす。膝はつま先と同じ向きに",
+  hip: "仰向けで膝を立て、お尻を持ち上げて2秒止める。上で骨盤底筋もキュッと締める",
+  pelvic: "おしっこを途中で止める感じで5秒締め、5秒ゆるめる。息は止めずに",
+  lunge: "片足を大きく後ろへ引いて腰を落とし、元に戻る。左右交互に",
+  deadbug: "仰向けで両手を天井へ、膝は90度。反対の手と足をゆっくり伸ばして戻す。腰は床につけたまま",
+  birddog: "四つばいで右手と左足をまっすぐ伸ばして2秒。戻して反対も",
+  wide: "足を大きく開いてつま先を外へ。内ももを意識して腰を落とす",
+  calf: "壁に手をつき、かかとを上げて一瞬止め、ゆっくり下ろす",
+  back: "うつぶせで胸と手足を少し浮かせて2秒止める。首はそらしすぎない",
+  plank: "肘とつま先で体を支え、頭からかかとまで一直線。お尻が上がりすぎないように",
+  quadR: "横向きに寝て、上の足首を手で持ち、かかとをお尻へ近づける",
+  ham: "両足を前に伸ばして座り、背すじを伸ばしたままおへそから前へ倒す",
+  glute: "仰向けで片方の足首を反対の膝にのせ（4の字）、下の太ももを胸へ引き寄せる",
+  hipflex: "片膝立ちで前の足に体重をのせ、腰を前へ。後ろ足の付け根が伸びる",
+  calfS: "壁に手をつき片足を後ろへ。かかとを床につけたまま、前の膝を曲げる",
+  catcow: "四つばいで、吐きながら背中を丸め、吸いながら胸を前に出してそらす",
+  chest: "後ろで手を組み、肩甲骨を寄せて胸を開く。あごは引いたまま",
+  side: "片手を上げて反対側へ体を倒す。15秒ずつ左右交互に",
+  child: "正座から上体を前に倒して額を床へ。お腹で深く呼吸し、吸うたびに骨盤底筋をゆるめる"
+};
+const REC = [
+  {src:"rec-strength", name:"筋トレ10分", rounds:1, gap:20, note:"前もも・お尻・骨盤底筋・体幹・背中・ふくらはぎ", items:[
+    W("スクワット",40,T.squat), W("お尻上げ（ヒップリフト）",40,T.hip), W("骨盤底筋しめる・ゆるめる",40,T.pelvic),
+    W("後ろ足ランジ",40,T.lunge), W("寝て手足のばし（デッドバグ）",40,T.deadbug), W("四つばい手足のばし（バードドッグ）",40,T.birddog),
+    W("足開きスクワット（ワイドスクワット）",40,T.wide), W("かかと上げ（カーフレイズ）",40,T.calf),
+    W("うつぶせ背中そらし（バックエクステンション）",40,T.back), W("肘つき体キープ（プランク）",40,T.plank)]},
+  {src:"rec-stretch", name:"ストレッチ10分", rounds:1, gap:0, note:"鍛えた筋肉をのばして、骨盤底筋をゆるめる", items:[
+    W("前ももをのばす 右",45,T.quadR), W("前ももをのばす 左",45,T.quadR), W("もも裏をのばす",60,T.ham),
+    W("お尻をのばす 右（4の字）",45,T.glute), W("お尻をのばす 左（4の字）",45,T.glute),
+    W("股関節の前をのばす 右",45,T.hipflex), W("股関節の前をのばす 左",45,T.hipflex),
+    W("ふくらはぎをのばす 右",30,T.calfS), W("ふくらはぎをのばす 左",30,T.calfS),
+    W("背中まるめ・そらし（キャット＆カウ）",60,T.catcow), W("胸ひらき",45,T.chest), W("体の横をのばす",45,T.side),
+    W("前に伏せて深呼吸（チャイルドポーズ）",60,T.child)]},
+  {src:"rec-mix", name:"筋トレ＋ストレッチ10分", rounds:1, gap:10, note:"前半で鍛えて、後半でのばす", items:[
+    W("スクワット",40,T.squat), W("お尻上げ（ヒップリフト）",40,T.hip), W("骨盤底筋しめる・ゆるめる",40,T.pelvic),
+    W("後ろ足ランジ",40,T.lunge), W("寝て手足のばし（デッドバグ）",40,T.deadbug), W("四つばい手足のばし（バードドッグ）",40,T.birddog),
+    W("かかと上げ（カーフレイズ）",40,T.calf),
+    W("前ももをのばす 右",30,T.quadR), W("前ももをのばす 左",30,T.quadR), W("もも裏をのばす",40,T.ham),
+    W("お尻をのばす 右（4の字）",30,T.glute), W("お尻をのばす 左（4の字）",30,T.glute),
+    W("前に伏せて深呼吸（チャイルドポーズ）",50,T.child)]}
+];
+function recToMenu(r){ return {id:uid(), src:r.src, name:r.name, rounds:r.rounds, gap:r.gap, items:JSON.parse(JSON.stringify(r.items))}; }
 function defaultState(){
   return {
-    menus:[
-      {id:uid(), name:"朝のストレッチ", rounds:1, gap:0, items:[
-        {name:"首まわし",sec:30,kind:"work"},{name:"肩甲骨ほぐし",sec:45,kind:"work"},
-        {name:"前屈",sec:45,kind:"work"},{name:"股関節 右",sec:40,kind:"work"},
-        {name:"股関節 左",sec:40,kind:"work"},{name:"背中のばし",sec:60,kind:"work"}]},
-      {id:uid(), name:"筋トレ基本", rounds:3, gap:15, items:[
-        {name:"スクワット",sec:40,kind:"work"},{name:"プッシュアップ",sec:30,kind:"work"},
-        {name:"プランク",sec:40,kind:"work"},{name:"ランジ",sec:40,kind:"work"}]}
-    ],
+    menus: REC.map(recToMenu),
     history:[],
     settings:{speak:false, prep:5, pip:"top"},
     updatedAt:0
@@ -507,7 +568,7 @@ function fmtLong(sec){
   return s ? m + "分" + s + "秒" : m + "分";
 }
 function clampInt(v, lo, hi, dflt){ v = parseInt(v,10); if(isNaN(v)) v = dflt; return Math.min(hi, Math.max(lo, v)); }
-function show(id){ const sh=document.getElementById("sheet"); if(sh) sh.hidden = true; document.querySelectorAll(".screen").forEach(el => el.hidden = (el.id !== id)); window.scrollTo(0,0); }
+function show(id){ ["sheet","recSheet"].forEach(x => { const el = document.getElementById(x); if(el) el.hidden = true; }); document.querySelectorAll(".screen").forEach(el => el.hidden = (el.id !== id)); window.scrollTo(0,0); }
 function twoTap(btn, label, confirmLabel, action){
   let armed = false, t = null;
   btn.addEventListener("click", () => {
@@ -532,7 +593,7 @@ function buildSeq(menu, prep){
   const rounds = Math.max(1, menu.rounds|0);
   for(let r = 1; r <= rounds; r++){
     items.forEach((it, k) => {
-      seq.push({kind: it.kind === "rest" ? "rest" : "work", name: it.name || (it.kind==="rest" ? "休憩" : "名前なし"), sec: it.sec, round: r});
+      seq.push({kind: it.kind === "rest" ? "rest" : "work", name: it.name || (it.kind==="rest" ? "休憩" : "名前なし"), tip: it.tip || "", sec: it.sec, round: r});
       const isLast = (r === rounds && k === items.length - 1);
       const next = items[(k+1) % items.length];
       if(menu.gap > 0 && !isLast && it.kind !== "rest" && next && next.kind !== "rest"){
@@ -604,6 +665,20 @@ function renderHome(){
 }
 (function(){ const lg = $("#appName"); const replay = () => { lg.classList.remove("again"); void lg.offsetWidth; lg.classList.add("again"); };
   lg.addEventListener("click", replay); lg.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); replay(); } }); })();
+function renderRec(){
+  const box = $("#recList"); box.textContent = "";
+  REC.forEach(r => {
+    const have = state.menus.some(m => m.src === r.src);
+    const btn = h("button",{class:"btn" + (have ? "" : " primary"),type:"button",text: have ? "追加済み" : "＋ 追加"});
+    if(have) btn.disabled = true;
+    btn.addEventListener("click", () => { state.menus.push(recToMenu(r)); save(); renderHome(); renderRec(); });
+    box.append(h("div",{class:"rec"},
+      h("div",{class:"info"}, h("h3",{text:r.name + "（約" + fmtLong(menuTotal(r)) + "）"}), h("p",{text:r.note})), btn));
+  });
+}
+$("#openRec").addEventListener("click", () => { renderRec(); $("#recSheet").hidden = false; });
+$("#closeRec").addEventListener("click", () => { $("#recSheet").hidden = true; });
+$("#recSheet").addEventListener("click", e => { if(e.target.id === "recSheet") $("#recSheet").hidden = true; });
 $("#openSheet").addEventListener("click", () => { $("#sheet").hidden = false; });
 $("#closeSheet").addEventListener("click", () => { $("#sheet").hidden = true; });
 $("#sheet").addEventListener("click", e => { if(e.target.id === "sheet") $("#sheet").hidden = true; });
@@ -643,13 +718,15 @@ function renderItems(){
     const name = h("input",{class:"text",placeholder: it.kind==="rest" ? "休憩" : "種目名（例：スクワット）","aria-label":"名前"});
     name.value = it.name;
     name.addEventListener("input", () => { it.name = name.value; });
+    const tip = it.kind === "rest" ? null : h("input",{class:"text tipin",placeholder:"やり方メモ（任意）","aria-label":"やり方メモ"});
+    if(tip){ tip.value = it.tip || ""; tip.addEventListener("input", () => { it.tip = tip.value; }); }
     const up = h("button",{class:"icon",type:"button","aria-label":"上へ",text:"↑",onclick:() => { move(i,-1); }});
     const dn = h("button",{class:"icon",type:"button","aria-label":"下へ",text:"↓",onclick:() => { move(i,1); }});
     const del = h("button",{class:"icon",type:"button","aria-label":"削除",text:"✕",onclick:() => { draft.items.splice(i,1); renderItems(); updateTotal(); }});
     if(i === 0) up.disabled = true;
     if(i === draft.items.length - 1) dn.disabled = true;
     ol.append(h("li",{class:"item" + (it.kind === "rest" ? " rest" : "")},
-      name, h("div",{class:"ctrl"}, stepper, h("span",{class:"sp"}), up, dn, del)));
+      name, tip ? h("span",{class:"tipcell"}, tip) : null, h("div",{class:"ctrl"}, stepper, h("span",{class:"sp"}), up, dn, del)));
   });
 }
 function move(i, d){
@@ -668,7 +745,7 @@ bindStepper($("#gapStepper"), $("#fGap"), 0, 600, v => { draft.gap = v; updateTo
 $("#editBack").addEventListener("click", () => { draft = null; renderHome(); show("home"); });
 $("#editSave").addEventListener("click", () => {
   draft.name = draft.name.trim() || "名前なしのメニュー";
-  draft.items.forEach(it => { it.name = (it.name || "").trim(); });
+  draft.items.forEach(it => { it.name = (it.name || "").trim(); if(it.tip != null) it.tip = String(it.tip).trim(); });
   if(draft.id){ const k = state.menus.findIndex(m => m.id === draft.id); if(k >= 0) state.menus[k] = draft; }
   else { draft.id = uid(); state.menus.push(draft); }
   save(); draft = null; renderHome(); show("home");
@@ -715,7 +792,12 @@ function enterPhase(flash){
   const cur = run.seq[run.i], nxt = run.seq[run.i+1];
   R.dataset.kind = cur.kind;
   $("#kindLabel").textContent = cur.kind === "work" ? "いま" : cur.kind === "rest" ? "休憩" : "準備";
-  $("#nowName").textContent = cur.kind === "rest" ? "ひと息" : cur.kind === "prep" ? "はじまります" : cur.name;
+  const split = n => { const m = /^(.*?)（(.+?)）(.*)$/.exec(n || ""); return m ? [m[1] + m[3], m[2]] : [n, ""]; };
+  if(cur.kind === "work"){ const [a, b] = split(cur.name); $("#nowName").textContent = a; $("#aliasName").textContent = b; $("#tipLine").textContent = cur.tip || ""; }
+  else {
+    $("#nowName").textContent = cur.kind === "rest" ? "ひと息" : "はじまります"; $("#aliasName").textContent = "";
+    $("#tipLine").textContent = (nxt && nxt.kind === "work" && nxt.tip) ? "つぎの準備：" + nxt.tip : "";
+  }
   const nl = $("#nextLine"); nl.textContent = "";
   if(nxt) nl.append("つぎ ", h("b",{text: nxt.kind === "rest" && nxt.name === "休憩" ? "休憩" : nxt.name}), " " + fmtLong(nxt.sec));
   else nl.append("これで最後です");
